@@ -13,6 +13,9 @@ from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.prebuilt import ToolNode, create_react_agent, tools_condition
+import time
+import httpx  # adicione no topo do arquivo, se ainda não estiver
+
 
 
 # =============================
@@ -71,7 +74,6 @@ def criar_ferramenta_retrieve(store):
     return retrieve  # <--- ESSENCIAL
 
 
-
 # =============================
 # Execução do agente
 # =============================
@@ -118,8 +120,19 @@ def responder_pergunta(store, pergunta_usuario: str) -> str:
     memory = MemorySaver()
     agente = create_react_agent(llm, [retrieve_tool], checkpointer=memory)
 
-    resultado = agente.invoke(
-        {"messages": [{"role": "user", "content": pergunta_usuario}]},
-        config={"configurable": {"thread_id": "chat-tese"}}
-    )
-    return resultado["messages"][-1].content
+    input_data = {"messages": [{"role": "user", "content": pergunta_usuario}]}
+    config = {"configurable": {"thread_id": "chat-tese"}}
+
+    for attempt in range(10):
+        try:
+            resultado = agente.invoke(input_data, config=config)
+            return resultado["messages"][-1].content
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                print(f"Tentativa {attempt+1}: limite excedido (429). Aguardando 5 segundos...")
+                time.sleep(5)
+                continue
+            else:
+                raise
+        except Exception as e:
+            raise RuntimeError(f"Erro ao processar a pergunta: {e}")
